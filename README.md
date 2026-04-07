@@ -1,4 +1,4 @@
-# CDC2026: Goal-Conditioned Neural ODEs with Guaranteed Safety and Stability for Learning-Based All-Pairs Motion Planning
+# Goal-Conditioned Neural ODEs with Guaranteed Safety and Stability for Learning-Based All-Pairs Motion Planning
 
 This repository contains the code for our CDC2026 submission: [Goal-Conditioned Neural ODEs with Guaranteed Safety and Stability for Learning-Based All-Pairs Motion Planning](https://arxiv.org/html/2604.02821v1) (Dechuan Liu, Ruigang Wang, and Ian R. Manchester). 
 
@@ -17,16 +17,20 @@ The diffeomorphism mapping in the code is based on [Bi-lipschitz Neural Network]
 ## Organisation of this Repository
 This repositroy is structured as follows.
 
-src/: contains all source code used to run experiments, process results, and generate plots.
+`src/`: contains all source code used to run experiments, process results, and generate plots.
 
-results/: contains all plots and saved model weights used to produce the main results figures in the paper.
+`results/`: contains all plots and saved model weights used to produce the main results figures in the paper.
 
 ## Usage
-To train the models, run following script to train and save the models: 
+Run following script to generate the dataset by RRT:
+```
+python src/train_model.py
+```
 
-## Reproduce results
-
-## Other things to tune/do
+Run following script to train and save the models: 
+```
+python src/train_model.py
+```
 
 ## Contact
 For any questions or bugs, please raise an issue or contact Ruigang (Ray) Wang (ruigang.wang@sydney.edu.au) or Dechuan Liu (dechuan.liu@sydney.edu.au)
