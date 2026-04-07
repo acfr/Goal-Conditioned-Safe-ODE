@@ -22,6 +22,7 @@ import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint
 import matplotlib.pyplot as plt
+from flax import linen as nn 
 from robustnn.plnet_jax import PLNet
 from robustnn.bilipnet_jax import BiLipNet
 from utils import normalize_data, generate_path_in_gmap_space, monotone_uniform_map, draw_boundary, plot_gradient_descent_path, plot_value_contour, sample_points_on_line, get_line_and_value, sample_linear_on_sphere_boundary, sample_linear_grid_points
@@ -44,13 +45,14 @@ def main():
     depth = 12
     mu = 0.1
     nu = 128
-    prefix = 'results/2D-corridor/figures'
+    prefix = os.getcwd() + '/results/2D-corridor/figures/'
+    os.makedirs(os.path.dirname(prefix), exist_ok=True)
 
     # path to the trained parameters (adjust if you use a different run) -
     train_dir_pl = os.getcwd() + '/results/2D-corridor/model/pl'
 
     # instantiate model --------------------------------------------------
-    model_bilip = BiLipNet(linput_size=data_dim, 
+    model_bilip = BiLipNet(input_size=data_dim, 
                      units=layer_size, 
                      depth=depth, 
                      mu=mu, 
@@ -60,11 +62,16 @@ def main():
     # load checkpoint -----------------------------------------------------
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     params_pl = orbax_checkpointer.restore(f'{train_dir_pl}/ckpt/params')
-    params_bilip = params_pl.bilip_layer
-    params_bilip_inv = model_bilip.direct_to_explicit_inverse(params_bilip)
+    params_bilip = {'params':params_pl['params']['BiLipBlock']}
+    params_bilip_inv = model_bilip.direct_to_explicit_inverse(params_bilip,
+                                                        [1.0]*depth,
+                                                        [nn.relu]*depth,
+                                                        [500]*depth,
+                                                        [1.0]*depth)
+    params_bilip_explicit = model_bilip.direct_to_explicit(params_bilip)
 
     def network_gmapping_pl(point):
-        return model_pl.apply(params_pl, point, method=model_pl.gmap)
+        return model_bilip.explicit_call(params_bilip, point, params_bilip_explicit)
 
     # --- compute value function on a regular grid for contour plotting ---
     sample_in_axis = 200
@@ -93,7 +100,6 @@ def main():
 
     # determine the smallest radius from the mapped zero point ------------
     min_level = jnp.min(jnp.linalg.norm(contour_lines_mapped - zero_in_model, axis=1))
-    print('min_level =', float(min_level))
     
     # sample points on the circle (sphere in 2‑D) in latent/model space -----
     num_samples = 8000
@@ -173,7 +179,7 @@ def main():
         for spine in ax1.spines.values():
             spine.set_visible(False)
         ax1.set_xticks([]); ax1.set_yticks([])
-        fig1.savefig(f'{prefix}/model_space_boundary.pdf', dpi=300)
+        fig1.savefig(f'{prefix}model_space_boundary.pdf', dpi=300)
         plt.close(fig1)
 
     if is_plotting_maze_figure:
@@ -204,7 +210,7 @@ def main():
     
         # remove tile for cleaner look; adjust as needed
         ax2.set_title('', fontsize=12)
-        fig2.savefig(f'{prefix}/original_space.pdf', dpi=300)
+        fig2.savefig(f'{prefix}original_space.pdf', dpi=300)
         plt.close(fig2)
 
     if is_plotting_path_fixed:
@@ -251,7 +257,7 @@ def main():
             spine.set_visible(False)
 
         plt.tight_layout()
-        plt.savefig(f'{prefix}/original_maze_fixed.pdf',
+        plt.savefig(f'{prefix}original_maze_fixed.pdf',
                     dpi=300, bbox_inches='tight')
         
         # --------------------------------------------------------------------------------------------
@@ -267,7 +273,7 @@ def main():
         # --- Add arrows from contour points to zero_in_model ---
         # Sample points to avoid overcrowding (adjust step size as needed)
         points_y = generate_path_in_gmap_space(start_points, 
-            lambda point: model_pl.apply(params_pl, point, method=model_pl.gmap), 
+            network_gmapping_pl, 
             jnp.array(zero_point), 1000, step_size=0.01)
 
         # draw every path
@@ -298,7 +304,7 @@ def main():
             spine.set_visible(False)
 
         plt.tight_layout()
-        plt.savefig(f'{prefix}/maze_fixed.pdf',
+        plt.savefig(f'{prefix}maze_fixed.pdf',
                     dpi=300, bbox_inches='tight')
         
     if is_plotting_path_varying_z:
@@ -347,7 +353,7 @@ def main():
             spine.set_visible(False)
 
         plt.tight_layout()
-        plt.savefig(f'{prefix}/original_multi_start.pdf',
+        plt.savefig(f'{prefix}original_multi_start.pdf',
                     dpi=300, bbox_inches='tight')
         
         # --------------------------------------------------------------------------------------------
@@ -362,7 +368,7 @@ def main():
         # --- Add arrows from contour points to zero_in_model_new ---
         # Sample points to avoid overcrowding (adjust step size as needed)
         points_y = generate_path_in_gmap_space(start_points, 
-            lambda point: model_pl.apply(params_pl, point, method=model_pl.gmap), 
+            network_gmapping_pl, 
             jnp.array(zero_point_new), 1000, step_size=0.01)
 
         # draw every path
@@ -392,7 +398,7 @@ def main():
             spine.set_visible(False)
 
         plt.tight_layout()
-        plt.savefig(f'{prefix}/maze_multi_start.pdf',
+        plt.savefig(f'{prefix}maze_multi_start.pdf',
                     dpi=300, bbox_inches='tight')
 
 if __name__ == '__main__':

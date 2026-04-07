@@ -37,9 +37,11 @@ def get_fitness_loss(model,
             yh = model.apply(params, x)
         
         # take gradient value
-        loss = jnp.square(jax.nn.relu(jnp.where(y[:, 0] == 0, 
-                                                yh - y[:, 1],  
-                                                y[:, 1] - yh))).mean()
+        # loss = jnp.square(jax.nn.relu(jnp.where(y[:, 0] == 0, 
+        #                                         yh - y[:, 1],  
+        #                                         y[:, 1] - yh))).mean()
+
+        loss = optax.l2_loss(yh, y[:,1]).mean()
 
         if is_evaluation:
             return [loss]
