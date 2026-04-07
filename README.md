@@ -12,7 +12,9 @@ We construal goal-conditioned neural ODE, which induces the safe, stable, all-pa
 ![Motion Planning](/results/2D-corridor/demo-video/trajectory_and_point_multi_(0.6875,%200.4375).gif)
 
 ## Installation and Setup
-The diffeomorphism mapping in the code is based on [Bi-lipschitz Neural Network](https://github.com/acfr/RobustNeuralNetworks/tree/main). Please install as stated.
+The neural network used to construct bi-lipschitz diffeomorphism mapping is based on [Bi-lipschitz Neural Network](https://github.com/acfr/RobustNeuralNetworks/tree/main). Please install as stated.
+
+Please also install the packages listed in `requirements.txt`
 
 ## Organisation of this Repository
 This repositroy is structured as follows.
@@ -24,12 +26,17 @@ This repositroy is structured as follows.
 ## Usage
 Run following script to generate the dataset by RRT:
 ```
-python src/train_model.py
+python src/dataset_generation.py 
 ```
 
 Run following script to train and save the models: 
 ```
 python src/train_model.py
+```
+
+Run following script to visualize the results: 
+```
+python src/visualization.py
 ```
 
 ## Contact

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 '''
 Generate data for 2D corridor.
 
