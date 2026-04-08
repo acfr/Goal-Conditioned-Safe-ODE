@@ -22,9 +22,9 @@ import jax.numpy as jnp
 import numpy as np
 import orbax.checkpoint
 import matplotlib.pyplot as plt
-from flax import linen as nn 
-from robustnn.plnet_jax import PLNet
-from robustnn.bilipnet_jax import BiLipNet
+from plnet_layer import V_PLNet, BiLipNet, MonLipNet
+from layer import Unitary
+from solver import get_bilipnet_params, mln_back_solve_dys
 from utils import normalize_data, generate_path_in_gmap_space, monotone_uniform_map, draw_boundary, plot_gradient_descent_path, plot_value_contour, sample_points_on_line, get_line_and_value, sample_linear_on_sphere_boundary, sample_linear_grid_points
 
 def main():
@@ -49,29 +49,19 @@ def main():
     os.makedirs(os.path.dirname(prefix), exist_ok=True)
 
     # path to the trained parameters (adjust if you use a different run) -
-    train_dir_pl = os.getcwd() + '/results/2D-corridor/model/pl'
+    train_dir_pl = os.getcwd() + '/results/2D-corridor/model-pretrained/pl'
 
     # instantiate model --------------------------------------------------
-    model_bilip = BiLipNet(input_size=data_dim, 
-                     units=layer_size, 
-                     depth=depth, 
-                     mu=mu, 
-                     nu=nu)
-    model_pl = PLNet(model_bilip, optimal_point=jnp.array(zero_point))
+    block = BiLipNet(layer_size, depth=depth, mu=mu, nu=nu)
+    model_pl = V_PLNet(block)
+
 
     # load checkpoint -----------------------------------------------------
     orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
     params_pl = orbax_checkpointer.restore(f'{train_dir_pl}/ckpt/params')
-    params_bilip = {'params':params_pl['params']['BiLipBlock']}
-    params_bilip_inv = model_bilip.direct_to_explicit_inverse(params_bilip,
-                                                        [1.0]*depth,
-                                                        [nn.relu]*depth,
-                                                        [500]*depth,
-                                                        [1.0]*depth)
-    params_bilip_explicit = model_bilip.direct_to_explicit(params_bilip)
 
     def network_gmapping_pl(point):
-        return model_bilip.explicit_call(params_bilip, point, params_bilip_explicit)
+        return model_pl.apply(params_pl, point, method=model_pl.gmap)
 
     # --- compute value function on a regular grid for contour plotting ---
     sample_in_axis = 200
@@ -108,8 +98,22 @@ def main():
         rng, num_samples, center=zero_in_model, radius=min_level
     )
 
+    # prepare inverse mapping (using the same architecture as the forward net)
+    (uni_params, mon_params, b_params, bh_params) = get_bilipnet_params(
+        params_pl,
+        depth=depth,
+        orth=Unitary(),
+        mln=MonLipNet(layer_size, mu=mu ** (1.0 / depth),
+                      nu=nu ** (1.0 / depth)),
+        name='BiLipBlock',
+    )
+
     def inverse_func(data):
-        return model_bilip.inverse_call(params_bilip, data, params_bilip_inv)
+        return mln_back_solve_dys(
+            uni_params, mon_params, b_params, bh_params,
+            data, depth, layer_size, max_iter=500,
+        )
+
 
     # map everything back to input space ---------------------------------
     sphere_orig = inverse_func(sphere_samples)
@@ -297,7 +301,6 @@ def main():
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_xlabel("", fontsize=14, fontname="serif", labelpad=6)
         ax.set_ylabel("", fontsize=14, fontname="serif", labelpad=6)
-        # ax.legend(frameon=False, fontsize=11, loc='upper right')
 
         # Hide frame
         for spine in ax.spines.values():
@@ -346,7 +349,6 @@ def main():
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_xlabel("", fontsize=14, fontname="serif", labelpad=6)
         ax.set_ylabel("", fontsize=14, fontname="serif", labelpad=6)
-        # ax.legend(frameon=False, fontsize=11, loc='upper right')
 
         # Hide frame
         for spine in ax.spines.values():
@@ -391,7 +393,6 @@ def main():
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_xlabel("", fontsize=14, fontname="serif", labelpad=6)
         ax.set_ylabel("", fontsize=14, fontname="serif", labelpad=6)
-        # ax.legend(frameon=False, fontsize=11, loc='upper right')
 
         # Hide frame
         for spine in ax.spines.values():

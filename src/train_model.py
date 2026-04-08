@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 '''
 Train the diffeomorphism as Equation (35) in the paper for 2D corridor.
 
@@ -13,9 +12,8 @@ import jax.numpy as jnp
 import orbax.checkpoint
 import jax
 from flax.training import train_state, orbax_utils
-from utils import DataLoader_maze, normalize_data, map_obstacle
-from robustnn.plnet_jax import PLNet
-from robustnn.bilipnet_jax import BiLipNet
+from utils import DataLoader_maze, normalize_data
+from plnet_layer import V_PLNet, BiLipNet
 
 def get_fitness_loss(model, 
                     optimal_point = None,
@@ -199,13 +197,9 @@ def training(lr_max, rng, root_dir, params, file_path, x_range, y_range):
         }
     
     # create models
-    block = BiLipNet(input_size=data_dim, 
-                    units=layer_size, 
-                    depth=depth, 
-                    mu=mu, 
-                    nu=nu)
-        
-    model_pl = PLNet(BiLipBlock=block, optimal_point=jnp.array(zero_point))
+    block = BiLipNet(layer_size, depth=depth, mu=mu, nu=nu)
+
+    model_pl = V_PLNet(block)
 
     # set fitness function
     fitness_func_pl = get_fitness_loss(model_pl,
