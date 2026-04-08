@@ -45,7 +45,22 @@ def get_fitness_loss(model,
 
     return fitloss
 
-def train_with_flexible_loss(
+'''
+train the model with optimal
+take the loss function as input to allow more flexibility
+eg for optimal func:
+        optimal_func = lambda obs: jnp.zeros(jnp.shape(obs))
+eg for fitness_func:
+        @jax.jit
+        def fitloss(state, params, x, y):
+            yh = state.apply_fn(params, x)
+            logtau = model.apply(state.params, method=model.get_logtau)
+            logmu = model.apply(state.params, method=model.get_logmu)
+            loss_v = optax.l2_loss(yh, y).mean()
+            loss = loss_v + gam_logtau*logtau - gam_logmu * logmu
+            return loss
+'''
+def train_with_optimal_flexible_loss(
     rng,
     model,
     data,
@@ -55,10 +70,15 @@ def train_with_flexible_loss(
     train_dir: str = './results/rosenbrock-nd',
     lr_max: float = 1e-3,
     epochs: int = 600,
-    is_batched_input: bool= False):
-    '''
-    Train the model with flexible loss function.
-    '''
+    weight_update_func = None, # define if the weight is added for the fitness_func(state, param, x, y, weight) & weight update
+    figure_generation_function = lambda params, epoch: (params, epoch), # define a function that will be called perodically during training
+    figure_generation_period = 50, # define after which epoch, the figure generation function will be called. 
+):
+    # define weight matrix
+    is_adding_weight = True
+    if weight_update_func == None:
+        is_adding_weight = False
+
     ckpt_dir = f'{train_dir}/ckpt'
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -70,32 +90,35 @@ def train_with_flexible_loss(
     train_size = train_batches * train_batch_size
 
     rng, rng_model = random.split(rng)
-    
-    # special batch considered for J and R
-    if is_batched_input:
-        params = model.init(rng_model, jnp.ones((1, data_dim)))
-    else:
-        params = model.init(rng_model, jnp.ones(data_dim))
-    
+    params = model.init(rng_model, jnp.ones(data_dim), jnp.ones(data_dim))
     param_count = sum(x.size for x in jax.tree_util.tree_leaves(params))
     print(f'model: {name}, size: {param_count/1000000:.2f}M')
 
     total_steps = train_batches * epochs
     scheduler = optax.linear_onecycle_schedule(transition_steps=total_steps, 
-                                        peak_value=lr_max,
-                                        pct_start=0.25, 
-                                        pct_final=0.7,
-                                        div_factor=10., 
-                                        final_div_factor=200.)
+                                           peak_value=lr_max,
+                                           pct_start=0.25, 
+                                           pct_final=0.7,
+                                           div_factor=10., 
+                                           final_div_factor=200.)
     opt = optax.adam(learning_rate=scheduler)
     model_state = train_state.TrainState.create(apply_fn=model.apply,
                                                 params=params,
                                                 tx=opt)
-    
+    if is_adding_weight:
+        weight_matrix = jnp.array(jnp.ones_like(data['ytrain']))
+
     @jax.jit
     def train_step(state, x, y):
         grad_fn = jax.value_and_grad(fitness_func, argnums=1)
         loss, grads = grad_fn(state, state.params, x, y)
+        state = state.apply_gradients(grads=grads)
+        return state, loss 
+    
+    @jax.jit
+    def train_step_weighted(state, x, y, weight_matrix_batch):
+        grad_fn = jax.value_and_grad(fitness_func, argnums=1)
+        loss, grads = grad_fn(state, state.params, x, y, weight_matrix_batch)
         state = state.apply_gradients(grads=grads)
         return state, loss 
     
@@ -109,24 +132,39 @@ def train_with_flexible_loss(
         for b in range(train_batches):
             x = data['xtrain'][idx[b, :], :] 
             y = data['ytrain'][idx[b, :]]
-            model_state, loss = train_step(model_state, x, y)
+
+            # give weights back into fitness func
+            if is_adding_weight:
+                weight_matrix_batch = weight_matrix[idx[b, :]]
+                model_state, loss = train_step_weighted(model_state, x, y, weight_matrix_batch)
+            else:
+                model_state, loss = train_step(model_state, x, y)
+
             tloss += loss
-            
         tloss /= train_batches
         train_loss.append(tloss)
 
+        # update weight matrix
+        if is_adding_weight:
+            weight_matrix = weight_update_func(model_state.params, data['xtrain'], data['ytrain'], weight_matrix)
+
+        # call perodically to get the middle step of training
+        if epoch % figure_generation_period == 0:
+            figure_generation_function(model_state.params, epoch)
+
+        # validation
         vloss = fitness_eval_func(model_state, model_state.params, data['xtest'], data['ytest'])
         val_loss.append(vloss)
 
-        lipmin, lipmax, tau = model.get_bounds(model_state.params)
+        lipmin, lipmax, tau = model.apply(model_state.params, method=model.get_bounds)
         Lipmin.append(lipmin)
         Lipmax.append(lipmax)
         Tau.append(tau)
 
-        print(f'Epoch: {epoch+1:3d} | loss: {tloss:.3f}/{vloss}, tau: {tau:.3f}, Lip: {lipmin:.3f}/{lipmax:.2f}')
-        
+        print(f'Epoch: {epoch+1:3d} | loss: {tloss:.4f}/{vloss[-1]:.4f}, tau: {tau:.1f}, Lip: {lipmin:.3f}/{lipmax:.2f}')
+
     eloss = fitness_eval_func(model_state, model_state.params, data['xeval'], data['yeval'])
-    print(f'{name}: eval loss: {eloss}')
+    print(f'{name}: eval loss: {eloss[-1]}')
 
     data['train_loss'] = jnp.array(train_loss)
     data['val_loss'] = jnp.array(val_loss)
@@ -217,7 +255,7 @@ def training(lr_max, rng, root_dir, params, file_path, x_range, y_range):
     prefix = f'model'
     train_dir_pl = f'{root_dir}/{prefix}/pl'
 
-    train_with_flexible_loss(rng, model_pl, data, 
+    train_with_optimal_flexible_loss(rng, model_pl, data, 
                                 fitness_func=fitness_func_pl,
                                 fitness_eval_func=fitness_eval_func_pl,
                                 name=name, 
